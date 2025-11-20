@@ -21,6 +21,7 @@
   "license": "MIT",
   "packageManager": "pnpm@10.9.0",
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^24.10.1",
     "tsx": "^4.20.6"
   },

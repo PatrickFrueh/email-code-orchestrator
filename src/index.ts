@@ -25,7 +25,13 @@ async function fetchEmails() {
     const messages = client.fetch({ seen: false }, { envelope: true, source: true });
     
     for await (let msg of messages) {
-    //   console.log('Found message:', msg.envelope?.subject);
+      console.log('Found message:', msg.envelope?.subject);
+
+      // Skip if no source data
+      if (!msg.source) {
+        console.log('No source data, skipping...');
+        continue;
+      }
 
       // Parse the raw email source
       const parsed = await simpleParser(msg.source);
