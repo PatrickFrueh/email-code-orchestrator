@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import 'dotenv/config';
 
 async function fetchEmails() {
@@ -24,7 +25,14 @@ async function fetchEmails() {
     const messages = client.fetch({ seen: false }, { envelope: true, source: true });
     
     for await (let msg of messages) {
-      console.log('Found message:', msg.envelope?.subject);
+    //   console.log('Found message:', msg.envelope?.subject);
+
+      // Parse the raw email source
+      const parsed = await simpleParser(msg.source);
+      
+      // Display structured content
+      console.log('HTML body:', parsed.html);
+      console.log('Text body:', parsed.text);
     }
   } finally {
     lock.release();
