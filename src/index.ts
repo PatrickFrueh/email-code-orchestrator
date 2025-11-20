@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { extractLinks, extractCodes, filterCodeLinks, fetchCodeFromLink } from './extractor.js';
+import { confirmNetflixHousehold, extractHouseholdActionLink } from './browser-automation.js';
 import 'dotenv/config';
 
 async function fetchEmails() {
@@ -39,8 +40,60 @@ async function fetchEmails() {
       
       console.log(`\n📧 Processing: ${msg.envelope?.subject}`);
       
+      const subject = msg.envelope?.subject || '';
+      const emailText = parsed.text || '';
+      const emailHtml = parsed.html || '';
+      
+      // Detect email type by subject/content
+      const isHouseholdUpdate = subject.includes('Haushalt') || 
+                                emailText.includes('Aktualisierung bestätigen') ||
+                                emailText.includes('Ja, das war ich');
+      
+      if (isHouseholdUpdate) {
+        console.log('🏠 Detected Netflix household update email');
+        
+        // Extract the action link
+        const actionLink = extractHouseholdActionLink(emailHtml);
+        
+        if (!actionLink) {
+          console.log('   ⚠️  Could not find household action link');
+          continue;
+        }
+        
+        console.log('   🔗 Found action link:', actionLink);
+        
+        // Check if Netflix credentials are configured
+        const netflixEmail = process.env.NETFLIX_EMAIL;
+        const netflixPassword = process.env.NETFLIX_PASSWORD;
+        
+        if (!netflixEmail || !netflixPassword) {
+          console.log('   ⚠️  Netflix credentials not configured in .env');
+          console.log('   💡 Add NETFLIX_EMAIL and NETFLIX_PASSWORD to .env to enable automation');
+          console.log('   🔗 Manual action required: Open this link to confirm:');
+          console.log('      ', actionLink);
+          continue;
+        }
+        
+        // Perform browser automation
+        console.log('   🤖 Starting browser automation...');
+        
+        const success = await confirmNetflixHousehold(actionLink, {
+          email: netflixEmail,
+          password: netflixPassword,
+        });
+        
+        if (success) {
+          console.log('   ✅ Household update completed successfully!');
+        } else {
+          console.log('   ❌ Automation failed - manual intervention may be required');
+          console.log('   🔗 Try manually: ', actionLink);
+        }
+        
+        continue; // Move to next email
+      }
+      
       // Strategy 1: Try to find codes directly in email
-      const directCodes = extractCodes(parsed.text || '');
+      const directCodes = extractCodes(emailText);
       
       if (directCodes.length > 0) {
         console.log(`✅ Code found in email: ${directCodes.join(', ')}`);
@@ -48,12 +101,11 @@ async function fetchEmails() {
       }
       
       // Strategy 2: No direct code, look for "code request" links
-      const allLinks = extractLinks(parsed.html || '');
+      const allLinks = extractLinks(emailHtml);
       const codeLinks = filterCodeLinks(allLinks);
       
       if (codeLinks.length > 0) {
         console.log(`🔗 No direct code. Found ${codeLinks.length} verification link(s)`);
-        console.log('HTML body:', parsed.html);
         // Try each code link until we find a code
         for (const link of codeLinks) {
           console.log(`   Fetching: ${link}`);
