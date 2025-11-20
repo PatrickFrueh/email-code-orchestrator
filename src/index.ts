@@ -1,5 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { extractLinks, extractCodes, filterCodeLinks, fetchCodeFromLink } from './extractor.js';
 import 'dotenv/config';
 
 async function fetchEmails() {
@@ -25,7 +26,7 @@ async function fetchEmails() {
     const messages = client.fetch({ seen: false }, { envelope: true, source: true });
     
     for await (let msg of messages) {
-      console.log('Found message:', msg.envelope?.subject);
+      // console.log('Found message:', msg.envelope?.subject);
 
       // Skip if no source data
       if (!msg.source) {
@@ -36,9 +37,38 @@ async function fetchEmails() {
       // Parse the raw email source
       const parsed = await simpleParser(msg.source);
       
-      // Display structured content
-      console.log('HTML body:', parsed.html);
-      console.log('Text body:', parsed.text);
+      console.log(`\n📧 Processing: ${msg.envelope?.subject}`);
+      
+      // Strategy 1: Try to find codes directly in email
+      const directCodes = extractCodes(parsed.text || '');
+      
+      if (directCodes.length > 0) {
+        console.log(`✅ Code found in email: ${directCodes.join(', ')}`);
+        continue; // Skip to next email
+      }
+      
+      // Strategy 2: No direct code, look for "code request" links
+      const allLinks = extractLinks(parsed.html || '');
+      const codeLinks = filterCodeLinks(allLinks);
+      
+      if (codeLinks.length > 0) {
+        console.log(`🔗 No direct code. Found ${codeLinks.length} verification link(s)`);
+        console.log('HTML body:', parsed.html);
+        // Try each code link until we find a code
+        for (const link of codeLinks) {
+          console.log(`   Fetching: ${link}`);
+          const code = await fetchCodeFromLink(link);
+          
+          if (code) {
+            console.log(`✅ Code extracted from link: ${code}`);
+            break; // Stop after first success
+          } else {
+            console.log(`   ⚠️  No code found at this link`);
+          }
+        }
+      } else {
+        console.log(`ℹ️  No codes or verification links found`);
+      }
     }
   } finally {
     lock.release();
