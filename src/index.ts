@@ -2,6 +2,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { extractLinks, extractCodes, filterCodeLinks, fetchCodeFromLink } from './extractor.js';
 import { confirmNetflixHousehold, extractHouseholdActionLink } from './browser-automation.js';
+import { sendCodeNotification, sendHouseholdNotification, sendErrorNotification } from './messaging/telegram.js';
 import 'dotenv/config';
 
 async function fetchEmails() {
@@ -23,6 +24,9 @@ async function fetchEmails() {
   const lock = await client.getMailboxLock('INBOX');
   
   try {
+    // Track processed message UIDs to mark as seen later
+    const processedUIDs: number[] = [];
+    
     // Search for unseen messages
     const messages = client.fetch({ seen: false }, { envelope: true, source: true });
     
@@ -84,10 +88,15 @@ async function fetchEmails() {
         
         if (success) {
           console.log('   ✅ Household update completed successfully!');
+          await sendHouseholdNotification(true, netflixEmail);
         } else {
           console.log('   ❌ Automation failed - manual intervention may be required');
           console.log('   🔗 Try manually: ', actionLink);
+          await sendHouseholdNotification(false, netflixEmail, 'Automation failed - manual intervention required');
         }
+        
+        // Track for marking as seen later
+        processedUIDs.push(msg.uid);
         
         continue; // Move to next email
       }
@@ -97,6 +106,15 @@ async function fetchEmails() {
       
       if (directCodes.length > 0) {
         console.log(`✅ Code found in email: ${directCodes.join(', ')}`);
+        await sendCodeNotification(
+          directCodes[0],
+          subject,
+          msg.envelope?.from?.[0]?.address || 'Unknown sender'
+        );
+        
+        // Track for marking as seen later
+        processedUIDs.push(msg.uid);
+        
         continue; // Skip to next email
       }
       
@@ -113,6 +131,15 @@ async function fetchEmails() {
           
           if (code) {
             console.log(`✅ Code extracted from link: ${code}`);
+            await sendCodeNotification(
+              code,
+              subject,
+              msg.envelope?.from?.[0]?.address || 'Unknown sender'
+            );
+            
+            // Track for marking as seen later
+            processedUIDs.push(msg.uid);
+            
             break; // Stop after first success
           } else {
             console.log(`   ⚠️  No code found at this link`);
@@ -121,6 +148,12 @@ async function fetchEmails() {
       } else {
         console.log(`ℹ️  No codes or verification links found`);
       }
+    }
+    
+    // Mark all processed emails as seen (after iteration completes)
+    if (processedUIDs.length > 0) {
+      console.log(`\n📧 Marking ${processedUIDs.length} email(s) as read...`);
+      await client.messageFlagsAdd(processedUIDs, ['\\Seen']);
     }
   } finally {
     lock.release();
