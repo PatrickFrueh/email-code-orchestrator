@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  app:
+    # Build from the local Dockerfile (includes Puppeteer deps)
+    build: .
+    image: email-code-orchestrator:basic
+    container_name: email-code-orchestrator
+    restart: unless-stopped
+    env_file:
+      - .env

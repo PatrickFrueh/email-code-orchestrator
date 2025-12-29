@@ -162,7 +162,57 @@ async function fetchEmails() {
   await client.logout();
 }
 
-fetchEmails().catch(err => {
-  console.error('Error:', err);
+// --- Minimal polling loop ---
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 5 * 60 * 1000);
+let isRunning = false;
+let timer: NodeJS.Timeout | null = null;
+
+async function runOnce() {
+  if (isRunning) {
+    console.log('⏳ Previous cycle still running, skipping this tick');
+    return;
+  }
+  isRunning = true;
+  try {
+    await fetchEmails();
+  } catch (err: any) {
+    console.error('❌ Polling cycle failed:', err);
+    try {
+      await sendErrorNotification(err?.message || String(err), 'polling');
+    } catch {}
+  } finally {
+    isRunning = false;
+  }
+}
+
+async function main() {
+  console.log('🚀 Email Code Orchestrator starting...');
+  console.log(`🔁 Polling every ${Math.round(POLL_INTERVAL_MS / 1000)} seconds`);
+
+  // Initial run
+  await runOnce();
+
+  // Schedule subsequent runs
+  timer = setInterval(() => {
+    void runOnce();
+  }, POLL_INTERVAL_MS);
+
+  // Graceful shutdown
+  const shutdown = (signal: string) => {
+    console.log(`Received ${signal}, shutting down...`);
+    if (timer) clearInterval(timer);
+    // Give a brief moment for current cycle to finish
+    const waitMs = 2000;
+    setTimeout(() => process.exit(0), waitMs);
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+main().catch(async (err) => {
+  console.error('Fatal startup error:', err);
+  try {
+    await sendErrorNotification(err?.message || String(err), 'startup');
+  } catch {}
   process.exit(1);
 });
